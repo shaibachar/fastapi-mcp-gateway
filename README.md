@@ -1,17 +1,18 @@
 # fastapi-mcp-gateway
 
-Zero-boilerplate library to expose REST APIs as MCP (Model Context Protocol) servers.
+Zero-boilerplate library to expose REST APIs and GraphQL APIs as MCP (Model Context Protocol) servers.
 
 ## Overview
 
-`fastapi-mcp-gateway` provides runtime conversion of FastAPI or OpenAPI 3.x REST APIs into MCP servers, allowing AI agents to easily interact with your APIs. No code generation, no extra build steps - just pure runtime magic.
+`fastapi-mcp-gateway` provides runtime conversion of FastAPI, OpenAPI 3.x REST APIs, and GraphQL APIs into MCP servers, allowing AI agents to easily interact with your APIs. No code generation, no extra build steps - just pure runtime magic.
 
 ## Features
 
 - 🚀 **Zero Boilerplate**: Minimal setup required
 - 🔄 **Runtime Conversion**: No code generation step needed
 - 🎯 **FastAPI First**: Optimized for FastAPI, but works with any OpenAPI 3.x API
-- 🔌 **Dual Mode**: In-process or HTTP execution
+- 🔷 **GraphQL Support**: Full support for GraphQL queries and mutations
+- 🔌 **Multiple Modes**: In-process, HTTP, or GraphQL execution
 - 🛠️ **MCP Client**: Built-in client for programmatic tool calls
 - ⚙️ **Configurable**: Fine-grained control over exposed endpoints
 - 🧪 **Well Tested**: Comprehensive unit and integration tests
@@ -25,6 +26,11 @@ pip install fastapi-mcp-gateway
 For FastAPI support:
 ```bash
 pip install "fastapi-mcp-gateway[fastapi]"
+```
+
+For GraphQL support:
+```bash
+pip install "fastapi-mcp-gateway[graphql]"
 ```
 
 For development:
@@ -120,9 +126,36 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
+### Using a GraphQL API
+
+```python
+import asyncio
+from fastapi_mcp_gateway import create_mcp_server_from_graphql
+from fastapi_mcp_gateway.config import GatewayConfig, GraphQLOperationFilter
+
+async def main():
+    # Create MCP server from GraphQL endpoint
+    config = GatewayConfig(
+        # Filter operations: ALL, QUERIES_ONLY, or MUTATIONS_ONLY
+        graphql_operation_filter=GraphQLOperationFilter.ALL,
+    )
+    
+    mcp_server = await create_mcp_server_from_graphql(
+        "http://localhost:8000/graphql",
+        config=config
+    )
+    
+    await mcp_server.run()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
 ## Configuration
 
 The `GatewayConfig` class provides extensive configuration options:
+
+### REST API Configuration
 
 ```python
 from fastapi_mcp_gateway import create_mcp_server_from_fastapi, GatewayConfig
@@ -130,10 +163,10 @@ from fastapi_mcp_gateway.config import ExecutionMode
 import logging
 
 config = GatewayConfig(
-    # Execution mode: IN_PROCESS (direct calls) or HTTP (via requests)
+    # Execution mode: IN_PROCESS (direct calls), HTTP (via requests), or GRAPHQL
     mode=ExecutionMode.IN_PROCESS,
     
-    # Base URL for HTTP mode
+    # Base URL for HTTP/GraphQL mode
     base_url="http://localhost:8000",
     
     # Include only specific paths (None = all)
@@ -158,7 +191,33 @@ config = GatewayConfig(
 mcp_server = create_mcp_server_from_fastapi(app, config=config)
 ```
 
+### GraphQL Configuration
+
+```python
+from fastapi_mcp_gateway import create_mcp_server_from_graphql, GatewayConfig
+from fastapi_mcp_gateway.config import GraphQLOperationFilter
+
+config = GatewayConfig(
+    # Filter which operations to expose
+    graphql_operation_filter=GraphQLOperationFilter.ALL,  # or QUERIES_ONLY, MUTATIONS_ONLY
+    
+    # Include/exclude specific operations by name
+    include_operations=["user", "users", "createUser"],
+    exclude_operations=["deleteUser"],
+    
+    # GraphQL endpoint path (default: "/graphql")
+    graphql_endpoint="/graphql",
+)
+
+mcp_server = await create_mcp_server_from_graphql(
+    "http://localhost:8000/graphql",
+    config=config
+)
+```
+
 ## How It Works
+
+### REST APIs
 
 1. **Schema Loading**: The library loads your OpenAPI schema (from FastAPI app or URL)
 2. **Tool Mapping**: Each API endpoint is converted to an MCP tool with:
@@ -170,6 +229,19 @@ mcp_server = create_mcp_server_from_fastapi(app, config=config)
    - Separates query params and request body
    - Makes the HTTP call or calls FastAPI directly
    - Returns the JSON response
+
+### GraphQL APIs
+
+1. **Schema Loading**: The library introspects your GraphQL schema
+2. **Tool Mapping**: Each query/mutation is converted to an MCP tool with:
+   - Tool name (from operation name)
+   - Description (from field description)
+   - Input schema (from GraphQL arguments)
+3. **Execution**: When a tool is called, the library:
+   - Builds a GraphQL query/mutation with variables
+   - Sends HTTP POST to the GraphQL endpoint
+   - Parses the response and handles errors
+   - Returns the JSON data
 
 ## Path Filtering
 
@@ -221,6 +293,24 @@ mcp_server = await create_mcp_server_from_openapi(
 
 **Advantages**: Works with any HTTP API, supports remote servers  
 **Use when**: API is already deployed, or you need realistic HTTP behavior
+
+### GraphQL Mode
+
+Executes GraphQL operations via HTTP POST:
+
+```python
+config = GatewayConfig(
+    mode=ExecutionMode.GRAPHQL,
+    base_url="http://localhost:8000/graphql"
+)
+mcp_server = await create_mcp_server_from_graphql(
+    "http://localhost:8000/graphql",
+    config=config
+)
+```
+
+**Advantages**: Native GraphQL support, introspection, type-safe  
+**Use when**: Working with GraphQL APIs, need queries and mutations as tools
 
 ## Authentication
 
@@ -280,20 +370,28 @@ mypy fastapi_mcp_gateway
 ```
 fastapi-mcp-gateway/
 ├── fastapi_mcp_gateway/
-│   ├── __init__.py          # Public API
-│   ├── config.py            # Configuration classes
-│   ├── openapi_loader.py    # OpenAPI schema loading
-│   ├── mapping.py           # OpenAPI to MCP mapping
-│   ├── execution.py         # Tool execution logic
-│   ├── mcp_server.py        # MCP server implementation
-│   └── mcp_client.py        # MCP client wrapper
+│   ├── __init__.py              # Public API
+│   ├── config.py                # Configuration classes
+│   ├── openapi_loader.py        # OpenAPI schema loading
+│   ├── graphql_loader.py        # GraphQL schema loading
+│   ├── mapping.py               # OpenAPI to MCP mapping
+│   ├── graphql_mapping.py       # GraphQL to MCP mapping
+│   ├── execution.py             # REST tool execution logic
+│   ├── graphql_execution.py     # GraphQL tool execution
+│   ├── mcp_server.py            # MCP server implementation
+│   └── mcp_client.py            # MCP client wrapper
 ├── tests/
-│   ├── unit/                # Unit tests
-│   └── integration/         # Integration tests
+│   ├── unit/                    # Unit tests
+│   └── integration/             # Integration tests
+├── examples/
+│   ├── simple_server.py         # FastAPI REST example
+│   ├── graphql_server.py        # GraphQL server example
+│   ├── graphql_mcp_server.py    # GraphQL MCP server
+│   └── graphql_client.py        # GraphQL MCP client
 ├── spec/
-│   └── design.md           # Design specification
-├── pyproject.toml          # Package configuration
-└── README.md              # This file
+│   └── design.md                # Design specification
+├── pyproject.toml               # Package configuration
+└── README.md                    # This file
 ```
 
 ## Limitations (v1)
@@ -302,15 +400,22 @@ fastapi-mcp-gateway/
 - No WebSocket or SSE support
 - No typed client generation
 - Basic authentication support only
+- GraphQL subscriptions not supported
+- GraphQL fragments and directives not supported
 
 ## Roadmap
 
 - [ ] WebSocket and SSE support
+- [ ] GraphQL subscriptions (via WebSocket)
+- [ ] GraphQL fragments and directives
+- [ ] GraphQL federation support
 - [ ] Semantic tool descriptions enhancement
-- [ ] Typed client generation
+- [ ] Typed client generation (REST + GraphQL)
 - [ ] CLI launcher for easy deployment
 - [ ] Support for more content types
 - [ ] Advanced authentication flows (OAuth2, etc.)
+- [ ] Hybrid REST + GraphQL endpoints
+- [ ] GraphQL query optimization and batching
 
 ## Contributing
 
